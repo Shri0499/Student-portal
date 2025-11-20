@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guidely & IBS Learning Center</title>
+  
+  <!-- 1. LOAD EXTERNAL LIBRARIES -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <!-- 2. FIREBASE COMPAT LIBRARIES (Guaranteed to work without 'modules') -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    body { font-family: 'Inter', sans-serif; background: #f3f4f6; min-height: 100vh; }
+    
+    .card { background: white; border-radius: 1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 1rem; }
+    .btn { padding: 0.5rem 1rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: 0.2s; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-secondary { background: #e5e7eb; color: #374151; }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-success { background: #16a34a; color: white; }
+    .input-field { width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.5rem; margin-top: 4px; }
+    
+    /* Loading Overlay */
+    #loader { position: fixed; inset: 0; background: white; z-index: 9999; display: flex; justify-content: center; align-items: center; flex-direction: column; }
+    
+    /* Modals */
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 50; padding: 1rem; }
+    .modal-content { background: white; padding: 1.5rem; border-radius: 1rem; width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
+    
+    /* Tabs */
+    .tab-btn { flex: 1; padding: 1rem; text-align: center; cursor: pointer; font-weight: 600; color: #6b7280; border-bottom: 2px solid #e5e7eb; }
+    .tab-btn.active { color: #2563eb; border-bottom-color: #2563eb; }
+  </style>
+</head>
+<body>
+
+  <!-- Global Loader -->
+  <div id="loader">
+      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <p class="mt-4 text-gray-500">Starting App...</p>
+  </div>
+
+  <!-- Header -->
+  <header class="bg-white shadow-sm h-16 sticky top-0 z-20 flex items-center justify-between px-4">
+    <div class="font-bold text-lg text-blue-700">Guidely & IBS</div>
+    <button id="logout-btn" onclick="logout()" class="hidden text-sm text-red-600 font-bold border border-red-200 px-3 py-1 rounded">Log Out</button>
+  </header>
+
+  <!-- Main Content -->
+  <main id="app-root" class="p-4 max-w-5xl mx-auto"></main>
+
+  <!-- Modal Structure -->
+  <div id="modal" class="modal-backdrop" onclick="closeModal(event)">
+      <div class="modal-content" onclick="event.stopPropagation()">
+          <div id="modal-body"></div>
+          <button onclick="closeModal()" class="mt-4 w-full btn btn-secondary">Close</button>
+      </div>
+  </div>
+
+  <script>
+    // ==========================================
+    // STEP 1: PASTE YOUR FIREBASE CONFIG HERE
+    // ==========================================
+    const firebaseConfig = {
+       apiKey: "AIzaSyCIbJUeEBbB9-W2x1Ni7B_azsS1DFOtlOs",
+  	authDomain: "studentportal-7ba75.firebaseapp.com",
+  	projectId: "studentportal-7ba75",
+  	storageBucket: "studentportal-7ba75.appspot.com",
+  	messagingSenderId: "529968274796",
+  	appId: "1:529968274796:web:a37ca33c9e653a468de749"
+    };
+
+    // ==========================================
+    // STEP 2: DETAILS
+    // ==========================================
+    const UPI_ID = "ibsjpnagar-3@okhdfcbank"; 
+    const PAYEE_NAME = "Guidely & IBS Learning Center";
+    const ADMIN_ID = "shriniketan.j";
+
+    // --- INITIALIZE FIREBASE ---
+    let db, auth;
+    try {
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.firestore();
+        auth = firebase.auth();
+        
+        // Anonymous Auth
+        auth.signInAnonymously().then(() => {
+            console.log("Connected to Database");
+            initApp();
+        }).catch(e => alert("Auth Error: " + e.message));
+
+    } catch (e) {
+        document.getElementById('loader').innerHTML = `<div class="text-red-600 font-bold p-4">Config Error. Check Keys.<br>${e.message}</div>`;
+    }
+
+    // --- STATE ---
+    let studentsData = [];
+    let currentUser = null;
+    let isAdmin = false;
+    let loginTab = 'student'; // 'student' or 'admin'
+
+    // --- CORE APP ---
+    function initApp() {
+        document.getElementById('loader').style.display = 'none';
+        
+        const savedUser = localStorage.getItem('portalUser');
+        if (savedUser) {
+            login(savedUser);
+        } else {
+            renderLogin();
+        }
+    }
+
+    function login(id) {
+        if(!id) return alert("Enter ID");
+        
+        // Validation
+        if(loginTab === 'student' && id === ADMIN_ID) return alert("Use Admin Tab");
+        if(loginTab === 'admin' && id !== ADMIN_ID) return alert("Invalid Admin ID");
+
+        currentUser = id;
+        isAdmin = (id === ADMIN_ID);
+        localStorage.setItem('portalUser', id);
+        document.getElementById('logout-btn').classList.remove('hidden');
+
+        if(isAdmin) {
+            renderAdminDashboard();
+            startAdminListener();
+        } else {
+            startStudentListener(id);
+        }
+    }
+
+    function logout() {
+        localStorage.removeItem('portalUser');
+        location.reload();
+    }
+
+    // --- LOGIN SCREEN ---
+    function renderLogin() {
+        const isStu = loginTab === 'student';
+        document.getElementById('app-root').innerHTML = `
+            <div class="max-w-md mx-auto card overflow-hidden mt-10">
+                <div class="flex">
+                    <div onclick="switchTab('student')" class="tab-btn ${isStu ? 'active' : ''}">Student</div>
+                    <div onclick="switchTab('admin')" class="tab-btn ${!isStu ? 'active' : ''}">Admin</div>
+                </div>
+                <div class="p-8">
+                    <h2 class="text-2xl font-bold text-center mb-6">${isStu ? 'Student' : 'Admin'} Login</h2>
+                    <input id="login-input" class="input-field mb-4" placeholder="${isStu ? 'Enter Student ID' : 'Enter Admin ID'}">
+                    <button onclick="login(document.getElementById('login-input').value.trim())" class="btn btn-primary w-full py-3">Log In</button>
+                </div>
+            </div>
+        `;
+    }
+
+    function switchTab(tab) {
+        loginTab = tab;
+        renderLogin();
+    }
+
+    // --- ADMIN DASHBOARD ---
+    function renderAdminDashboard() {
+        document.getElementById('app-root').innerHTML = `
+            <div class="grid md:grid-cols-3 gap-4 mb-6">
+                <div class="card p-4 border-l-4 border-blue-500">
+                    <div class="text-gray-500">Total Students</div>
+                    <div class="text-2xl font-bold" id="stat-total">...</div>
+                </div>
+                <div class="card p-4 border-l-4 border-green-500">
+                    <div class="text-gray-500">Collected</div>
+                    <div class="text-2xl font-bold text-green-600" id="stat-collected">...</div>
+                </div>
+                <div class="card p-4 border-l-4 border-yellow-500">
+                    <div class="text-gray-500">Pending</div>
+                    <div class="text-2xl font-bold text-yellow-600" id="stat-pending">...</div>
+                </div>
+            </div>
+
+            <div class="card p-6 mb-6">
+                <h3 class="font-bold text-lg mb-4">Add New Student</h3>
+                <div class="grid gap-3 md:grid-cols-3">
+                    <input id="new-name" class="input-field" placeholder="Full Name">
+                    <input id="new-email" class="input-field" placeholder="Email">
+                    <select id="new-type" class="input-field">
+                        <option value="banking">Banking (₹16,000)</option>
+                        <option value="banking_ssc">Banking + SSC (₹18,000)</option>
+                    </select>
+                    <input id="new-batch" class="input-field" placeholder="Batch Name (e.g. July 15)">
+                    <input id="new-date" type="date" class="input-field">
+                    <button onclick="createStudent()" class="btn btn-primary w-full h-full">Add Student</button>
+                </div>
+            </div>
+
+            <div class="card p-4 overflow-x-auto">
+                <h3 class="font-bold text-lg mb-4">Student List</h3>
+                <input onkeyup="renderStudentTable(this.value)" placeholder="Search..." class="input-field mb-4">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-gray-100">
+                        <tr>
+                            <th class="p-3">Name</th>
+                            <th class="p-3">Batch</th>
+                            <th class="p-3">Fees</th>
+                            <th class="p-3">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="student-table-body"></tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    function startAdminListener() {
+        db.collection("students").onSnapshot((snapshot) => {
+            const list = [];
+            snapshot.forEach(doc => {
+                const d = doc.data();
+                // Safe Data Loading
+                list.push({
+                    id: doc.id,
+                    name: d.name || "Unknown",
+                    batchName: d.batchName || "N/A",
+                    totalFees: Number(d.totalFees) || 0,
+                    feesPaid: Number(d.feesPaid) || 0,
+                    discountGiven: Number(d.discountGiven) || 0,
+                    courseFee: Number(d.courseFee) || 0,
+                    enrollmentType: d.enrollmentType || "",
+                    enrollmentDate: d.enrollmentDate || new Date().toISOString(),
+                    bankingBooks: d.bankingBooks || "No",
+                    sscBooks: d.sscBooks || "No",
+                    guidelyApp: d.guidelyApp || "No",
+                    ibsApp: d.ibsApp || "No",
+                });
+            });
+            studentsData = list;
+            updateStats();
+            renderStudentTable();
+        });
+    }
+
+    function updateStats() {
+        const total = studentsData.length;
+        const collected = studentsData.reduce((acc, s) => acc + s.feesPaid, 0);
+        const pending = studentsData.reduce((acc, s) => acc + (s.totalFees - s.feesPaid), 0);
+        
+        document.getElementById('stat-total').innerText = total;
+        document.getElementById('stat-collected').innerText = "₹" + collected.toLocaleString();
+        document.getElementById('stat-pending').innerText = "₹" + pending.toLocaleString();
+    }
+
+    function renderStudentTable(search = "") {
+        const tbody = document.getElementById('student-table-body');
+        if(!tbody) return;
+        
+        const filtered = studentsData.filter(s => s.name.toLowerCase().includes(search.toLowerCase()));
+        
+        tbody.innerHTML = filtered.map(s => `
+            <tr class="border-b">
+                <td class="p-3 font-bold text-blue-600 cursor-pointer" onclick="openEditModal('${s.id}')">${s.name}<br><span class="text-xs text-gray-400 font-normal">${s.id}</span></td>
+                <td class="p-3">${s.batchName}</td>
+                <td class="p-3">Total: ₹${s.totalFees}<br><span class="text-green-600">Paid: ₹${s.feesPaid}</span></td>
+                <td class="p-3"><button onclick="openEditModal('${s.id}')" class="btn btn-secondary text-xs">Edit</button></td>
+            </tr>
+        `).join('');
+    }
+
+    // --- ACTIONS ---
+    async function createStudent() {
+        const name = document.getElementById('new-name').value;
+        const email = document.getElementById('new-email').value;
+        const type = document.getElementById('new-type').value;
+        const batch = document.getElementById('new-batch').value;
+        const date = document.getElementById('new-date').value;
+
+        if(!name || !email || !batch || !date) return alert("Fill all fields");
+
+        const fee = (type === 'banking_ssc') ? 18000 : 16000;
+        const id = name.toLowerCase().replace(/[^a-z0-9]/g, '.') + '.' + Math.floor(Math.random() * 1000);
+
+        try {
+            await db.collection("students").doc(id).set({
+                name, email, enrollmentType: type, batchName: batch, enrollmentDate: date,
+                courseFee: fee, discountGiven: 0, totalFees: fee, feesPaid: 0,
+                bankingBooks: "No", sscBooks: "No", guidelyApp: "No", ibsApp: "No",
+                paymentStatus: "not_paid", createdAt: new Date().toISOString()
+            });
+            alert("Student Added! ID: " + id);
+            // Clear form manually
+            document.getElementById('new-name').value = '';
+            document.getElementById('new-email').value = '';
+        } catch(e) { alert(e.message); }
+    }
+
+    window.openEditModal = (id) => {
+        const s = studentsData.find(st => st.id === id);
+        const html = `
+            <h3 class="font-bold text-lg mb-4">Edit Student: ${s.name}</h3>
+            
+            <div class="bg-gray-50 p-3 rounded mb-4">
+                <div class="grid grid-cols-2 gap-2 mb-2">
+                    <div><label class="text-xs">Course Fee</label><input disabled value="${s.courseFee}" class="input-field bg-gray-200"></div>
+                    <div><label class="text-xs">Discount (₹)</label><input id="ed-disc" type="number" value="${s.discountGiven}" class="input-field"></div>
+                </div>
+                <label class="text-xs">Total Paid (₹)</label><input id="ed-paid" type="number" value="${s.feesPaid}" class="input-field">
+                <button onclick="saveFees('${id}')" class="btn btn-primary w-full mt-2">Update Fees</button>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 mb-4">
+                <div><label class="text-xs">Bank Books</label><select id="ed-bank" class="input-field" onchange="updateRes('${id}', 'bankingBooks', this.value)"><option ${s.bankingBooks=='No'?'selected':''}>No</option><option ${s.bankingBooks=='Yes'?'selected':''}>Yes</option></select></div>
+                <div><label class="text-xs">SSC Books</label><select id="ed-ssc" class="input-field" onchange="updateRes('${id}', 'sscBooks', this.value)"><option ${s.sscBooks=='No'?'selected':''}>No</option><option ${s.sscBooks=='Yes'?'selected':''}>Yes</option><option ${s.sscBooks=='Not opted'?'selected':''}>Not opted</option></select></div>
+                <div><label class="text-xs">Guidely</label><select id="ed-guide" class="input-field" onchange="updateRes('${id}', 'guidelyApp', this.value)"><option ${s.guidelyApp=='No'?'selected':''}>No</option><option ${s.guidelyApp=='Yes'?'selected':''}>Yes</option></select></div>
+                <div><label class="text-xs">IBS</label><select id="ed-ibs" class="input-field" onchange="updateRes('${id}', 'ibsApp', this.value)"><option ${s.ibsApp=='No'?'selected':''}>No</option><option ${s.ibsApp=='Yes'?'selected':''}>Yes</option></select></div>
+            </div>
+
+            <button onclick="deleteStudent('${id}')" class="btn btn-danger w-full">Delete Student</button>
+        `;
+        openModal(html);
+    };
+
+    window.saveFees = async (id) => {
+        const s = studentsData.find(st => st.id === id);
+        const disc = Number(document.getElementById('ed-disc').value);
+        const paid = Number(document.getElementById('ed-paid').value);
+        const newTotal = s.courseFee - disc;
+        
+        let status = 'not_paid';
+        if(paid > 0) status = 'half_paid';
+        if(paid >= newTotal) status = 'fully_paid';
+
+        await db.collection("students").doc(id).update({
+            discountGiven: disc, totalFees: newTotal, feesPaid: paid, paymentStatus: status
+        });
+        closeModal();
+    };
+
+    window.updateRes = (id, field, val) => {
+        db.collection("students").doc(id).update({ [field]: val });
+    };
+
+    window.deleteStudent = (id) => {
+        if(confirm("Delete permanently?")) {
+            db.collection("students").doc(id).delete();
+            closeModal();
+        }
+    };
+
+    // --- STUDENT VIEW ---
+    function startStudentListener(id) {
+        document.getElementById('app-root').innerHTML = `<div class="p-10 text-center">Loading Profile...</div>`;
+        
+        db.collection("students").doc(id).onSnapshot(doc => {
+            if(!doc.exists) {
+                document.getElementById('app-root').innerHTML = `<div class="p-10 text-center text-red-600 font-bold">Record Not Found</div>`;
+                return;
+            }
+            const s = sanitizeStudent(id, doc.data());
+            window.currentStudent = s; // For PDF/QR
+            renderStudentDashboard(s);
+        });
+    }
+
+    function renderStudentDashboard(s) {
+        const due = s.totalFees - s.feesPaid;
+        const date = new Date(s.enrollmentDate);
+        const deadline = new Date(date.setDate(date.getDate() + 15));
+        const daysLeft = Math.ceil((deadline - new Date()) / (1000 * 60 * 60 * 24));
+
+        let banner = "";
+        if(s.paymentStatus === 'pending_verification') banner = `<div class="bg-blue-100 text-blue-800 p-4 rounded font-bold text-center mb-6">⏳ Verification Pending</div>`;
+        else if(due <= 0) banner = `<div class="bg-green-100 text-green-800 p-4 rounded font-bold text-center mb-6">✅ Admission Confirmed</div>`;
+        else if(daysLeft > 0) banner = `<div class="bg-yellow-100 text-yellow-800 p-4 rounded font-bold text-center mb-6">⚠️ Payment Due: ${daysLeft} Days Left</div>`;
+        else banner = `<div class="bg-red-100 text-red-800 p-4 rounded font-bold text-center mb-6">❌ Deadline Passed</div>`;
+
+        document.getElementById('app-root').innerHTML = `
+            <div class="max-w-2xl mx-auto mt-4">
+                <div class="card overflow-hidden">
+                    <div class="bg-blue-600 p-6 text-white">
+                        <h2 class="text-2xl font-bold">Hi, ${s.name.split(' ')[0]}</h2>
+                        <p class="opacity-90">${s.batchName}</p>
+                    </div>
+                    <div class="p-6">
+                        ${banner}
+                        <div class="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded border mb-6">
+                            <div><div class="text-xs text-gray-500">Course Fee</div><div class="font-bold">₹${s.courseFee}</div></div>
+                            <div><div class="text-xs text-gray-500">Discount</div><div class="font-bold text-green-600">-₹${s.discountGiven}</div></div>
+                            <div><div class="text-xs text-gray-500">Paid</div><div class="font-bold text-blue-600">₹${s.feesPaid}</div></div>
+                            <div><div class="text-xs text-gray-500">Due</div><div class="font-bold text-red-600">₹${due}</div></div>
+                        </div>
+
+                        <div class="mb-6">
+                            <h3 class="font-bold text-gray-700 mb-2">Resources</h3>
+                            <div class="grid grid-cols-2 gap-2 text-sm">
+                                <div class="flex justify-between border-b"><span>Banking</span><b>${s.bankingBooks}</b></div>
+                                <div class="flex justify-between border-b"><span>SSC</span><b>${s.sscBooks}</b></div>
+                                <div class="flex justify-between border-b"><span>Guidely</span><b>${s.guidelyApp}</b></div>
+                                <div class="flex justify-between border-b"><span>IBS</span><b>${s.ibsApp}</b></div>
+                            </div>
+                        </div>
+
+                        ${due > 0 && s.paymentStatus !== 'pending_verification' ? `
+                            <div class="grid grid-cols-2 gap-3 mb-3">
+                                <button onclick="showQR(${due})" class="btn btn-primary">Pay Full</button>
+                                <button onclick="showQR(${s.totalFees/2})" class="btn btn-secondary">Pay Half</button>
+                            </div>
+                            <button onclick="showUpload()" class="btn btn-success w-full">Upload Proof</button>
+                        ` : `<button onclick="generatePDF()" class="btn btn-secondary w-full border">Download Receipt</button>`}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // --- SHARED UTILS ---
+    function openModal(html) {
+        document.getElementById('modal-container').innerHTML = `<div class="modal-backdrop" onclick="closeModal(event)">
+            <div class="modal-content" onclick="event.stopPropagation()">${html}</div>
+        </div>`;
+        document.querySelector('.modal-backdrop').style.display = 'flex';
+    }
+    
+    window.closeModal = (e) => {
+        if(e) e.stopPropagation();
+        document.getElementById('modal-container').innerHTML = '';
+        if(qrTimerInterval) clearInterval(qrTimerInterval);
+    };
+
+    window.showQR = (amt) => {
+        if(UPI_ID.includes("YOUR")) return alert("Admin Config Error");
+        const link = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(PAYEE_NAME)}&am=${amt}&cu=INR`;
+        openModal(`
+            <div class="p-6 text-center">
+                <h3 class="font-bold text-xl mb-2">Scan to Pay ₹${amt}</h3>
+                <div id="qrcode" class="flex justify-center my-4"></div>
+                <div id="qr-timer" class="text-red-500 font-bold mb-4">5:00</div>
+                <button onclick="closeModal()" class="btn btn-secondary w-full">Close</button>
+            </div>
+        `);
+        new QRCode(document.getElementById("qrcode"), { text: link, width: 180, height: 180 });
+        let t = 300;
+        qrTimerInterval = setInterval(() => {
+            t--; document.getElementById('qr-timer').innerText = `${Math.floor(t/60)}:${(t%60).toString().padStart(2,'0')}`;
+            if(t<=0) { closeModal(); alert("Expired"); }
+        }, 1000);
+    };
+
+    window.showUpload = () => {
+        openModal(`
+            <div class="p-6">
+                <h3 class="font-bold mb-4">Upload Payment Proof</h3>
+                <input id="up-amt" type="number" class="input-field mb-3" placeholder="Amount Paid">
+                <input id="up-file" type="file" class="input-field mb-4" accept="image/*">
+                <button onclick="handleUpload()" class="btn btn-primary w-full">Submit</button>
+            </div>
+        `);
+    };
+
+    window.handleUpload = () => {
+        const file = document.getElementById('up-file').files[0];
+        const amt = Number(document.getElementById('up-amt').value);
+        if(!file || !amt) return alert("Fill all fields");
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                await db.collection("paymentApprovals").add({
+                    studentId: currentUser,
+                    studentName: window.currentStudent.name,
+                    amountPaid: amt,
+                    imageDataUrl: e.target.result,
+                    status: "pending",
+                    date: new Date().toISOString()
+                });
+                await db.collection("students").doc(currentUser).update({ paymentStatus: 'pending_verification' });
+                alert("Uploaded! Waiting for approval.");
+                closeModal();
+            } catch(e) { alert(e.message); }
+        };
+        reader.readAsDataURL(file);
+    };
+
+    window.generatePDF = () => {
+        const s = window.currentStudent;
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.text(PAYEE_NAME, 105, 20, {align:'center'});
+        doc.text("Fee Receipt", 105, 30, {align:'center'});
+        doc.text(`Name: ${s.name}`, 20, 50);
+        doc.text(`Batch: ${s.batchName}`, 20, 60);
+        doc.text(`Total Fees: Rs.${s.totalFees}`, 20, 80);
+        doc.text(`Paid: Rs.${s.feesPaid}`, 20, 90);
+        doc.text(`Status: ${s.feesPaid >= s.totalFees ? 'Fully Paid' : 'Due'}`, 20, 110);
+        doc.save("Receipt.pdf");
+    };
+  </script>
+</body>
+</html>
