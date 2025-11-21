@@ -5,23 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Guidely & IBS Learning Center</title>
   
-  <!-- 1. STYLING & ICONS -->
+  <!-- EXTERNAL LIBRARIES -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- 2. UTILITIES -->
   <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
-  <!-- 3. FIREBASE (COMPAT MODE - GUARANTEED TO WORK GLOBALLY) -->
+  <!-- FIREBASE COMPAT LIBRARIES -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-    body { font-family: 'Inter', sans-serif; background: linear-gradient(to bottom right, #f0f9ff, #eef2ff); min-height: 100vh; }
+    body { font-family: 'Inter', sans-serif; background: #f3f4f6; min-height: 100vh; }
     
-    .card { background: white; border-radius: 1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border: 1px solid #e5e7eb; margin-bottom: 1rem; }
+    .card { background: white; border-radius: 1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 1rem; border: 1px solid #e5e7eb; }
     .btn { padding: 0.5rem 1rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; justify-content: center; }
     .btn-primary { background: #2563eb; color: white; }
     .btn-secondary { background: #e5e7eb; color: #374151; }
@@ -35,14 +34,15 @@
     .tab-btn { flex: 1; padding: 1rem; text-align: center; cursor: pointer; font-weight: 600; color: #6b7280; border-bottom: 2px solid #e5e7eb; }
     .tab-btn.active { color: #2563eb; border-bottom-color: #2563eb; }
 
-    #sidebar { width: 16rem; background: #1f2937; color: white; flex-shrink: 0; height: calc(100vh - 4rem); overflow-y: auto; }
+    /* Sidebar - Hidden by default */
+    #sidebar { width: 16rem; background: #1f2937; color: white; flex-shrink: 0; height: calc(100vh - 4rem); overflow-y: auto; display: none; }
     .nav-link { display: block; padding: 0.75rem 1rem; cursor: pointer; }
     .nav-link:hover { background: #374151; }
     .nav-link.active { background: #2563eb; }
     
-    @media (max-width: 768px) {
-        #sidebar { display: none; }
-        #mobile-nav { display: flex; }
+    @media (min-width: 768px) {
+        /* Show sidebar only when 'active' class is added via JS */
+        #sidebar.active { display: block; }
     }
   </style>
 </head>
@@ -56,8 +56,8 @@
 
   <!-- Body -->
   <div class="flex flex-grow overflow-hidden">
-      <!-- Sidebar (Desktop) -->
-      <nav id="sidebar" class="hidden md:block">
+      <!-- Sidebar (Initially Hidden) -->
+      <nav id="sidebar">
           <div class="p-4 font-bold text-lg border-b border-gray-700">Menu</div>
           <a onclick="app.nav('dashboard')" id="nav-dashboard" class="nav-link">Dashboard</a>
           <a onclick="app.nav('students')" id="nav-students" class="nav-link">Students</a>
@@ -73,7 +73,7 @@
       </main>
   </div>
 
-  <!-- Mobile Nav -->
+  <!-- Mobile Nav (Bottom) -->
   <div id="mobile-nav" class="md:hidden bg-white border-t flex justify-around p-2 hidden">
       <button onclick="app.nav('dashboard')" class="p-2 text-sm font-bold">Dash</button>
       <button onclick="app.nav('students')" class="p-2 text-sm font-bold">Students</button>
@@ -90,7 +90,7 @@
 
   <script>
     // ==========================================
-    // CONFIGURATION
+    // STEP 1: CONFIG
     // ==========================================
     const firebaseConfig = {
        apiKey: "AIzaSyCIbJUeEBbB9-W2x1Ni7B_azsS1DFOtlOs",
@@ -105,7 +105,7 @@
     const PAYEE_NAME = "Guidely & IBS Learning Center";
     const ADMIN_ID = "shriniketan.j";
 
-    // --- INITIALIZE ---
+    // --- INIT ---
     let db, auth;
     try {
         firebase.initializeApp(firebaseConfig);
@@ -116,9 +116,18 @@
         document.body.innerHTML = `<div class="p-10 text-red-600 text-center"><b>Config Error:</b><br>${e.message}</div>`;
     }
 
-    // --- DATA SANITIZER (CRITICAL FIX) ---
-    // This fills in missing data so the app never crashes
-    function sanitizeStudent(id, d) {
+    // --- STATE ---
+    let studentsData = [];
+    let pendingApprovals = [];
+    let currentUser = null;
+    let isAdmin = false;
+    let loginTab = 'student';
+    let activePage = 'dashboard';
+    let qrTimerInterval = null;
+    let currentStudent = null;
+
+    // --- DATA SANITIZER ---
+    function sanitize(id, d) {
         return {
             id: id,
             name: d.name || "Unknown",
@@ -138,15 +147,8 @@
         };
     }
 
-    // --- MAIN APP OBJECT ---
-    const app = {
-        user: null,
-        role: null,
-        students: [],
-        mode: 'student',
-        qrTimer: null,
-
-        // AUTH
+    // --- APP CORE ---
+    window.app = {
         init: () => {
             auth.onAuthStateChanged(user => {
                 if(user) {
@@ -157,29 +159,36 @@
             });
         },
 
-        login: (e) => {
+        setTab: (mode) => {
+            loginTab = mode;
+            app.renderLogin();
+        },
+        
+        submitLogin: (e) => {
             e.preventDefault();
             const id = document.getElementById('login-id').value.trim();
             if(!id) return;
-            if(app.mode === 'student' && id === ADMIN_ID) return alert("Use Admin Tab");
-            if(app.mode === 'admin' && id !== ADMIN_ID) return alert("Invalid Admin ID");
+            if(loginTab === 'student' && id === ADMIN_ID) return alert("Use Admin Tab");
+            if(loginTab === 'admin' && id !== ADMIN_ID) return alert("Invalid Admin ID");
             localStorage.setItem('portalUser', id);
             app.loginSuccess(id);
         },
 
         loginSuccess: (id) => {
-            app.user = id;
-            app.role = (id === ADMIN_ID) ? 'admin' : 'student';
+            currentUser = id;
+            isAdmin = (id === ADMIN_ID);
             document.getElementById('logout-btn').classList.remove('hidden');
             
-            if(app.role === 'admin') {
-                document.getElementById('sidebar').classList.remove('hidden');
+            if(isAdmin) {
+                // Show Sidebar ONLY for Admin
+                document.getElementById('sidebar').classList.add('active'); 
                 document.getElementById('mobile-nav').classList.remove('hidden');
-                app.initAdmin();
+                app.startAdminListener();
             } else {
-                document.getElementById('sidebar').classList.add('hidden');
+                // Hide Sidebar for Student
+                document.getElementById('sidebar').classList.remove('active');
                 document.getElementById('mobile-nav').classList.add('hidden');
-                app.initStudent(id);
+                app.startStudentListener(id);
             }
         },
 
@@ -188,14 +197,13 @@
             location.reload();
         },
 
-        setTab: (mode) => {
-            app.mode = mode;
-            app.renderLogin();
-        },
-
-        // RENDERERS
         renderLogin: () => {
-            const isStu = app.mode === 'student';
+            // Ensure sidebar is hidden on login screen
+            document.getElementById('sidebar').classList.remove('active');
+            document.getElementById('mobile-nav').classList.add('hidden');
+            document.getElementById('logout-btn').classList.add('hidden');
+
+            const isStu = loginTab === 'student';
             document.getElementById('main-content').innerHTML = `
                 <div class="max-w-md mx-auto card mt-10 overflow-hidden">
                     <div class="flex border-b">
@@ -204,8 +212,8 @@
                     </div>
                     <div class="p-8">
                         <h2 class="text-2xl font-bold text-center mb-6">${isStu ? 'Student' : 'Admin'} Login</h2>
-                        <form onsubmit="app.login(event)">
-                            <input id="login-id" class="input-field mb-6" placeholder="Enter ID" required>
+                        <form onsubmit="app.submitLogin(event)">
+                            <input id="login-id" class="input-field mb-6" placeholder="${isStu ? 'Enter Student ID' : 'Enter Admin ID'}" required>
                             <button class="btn btn-primary w-full py-3">Log In</button>
                         </form>
                     </div>
@@ -213,113 +221,141 @@
             `;
         },
 
-        // --- ADMIN FUNCTIONS ---
-        initAdmin: () => {
-            app.nav('dashboard');
+        // --- ADMIN ---
+        startAdminListener: () => {
             db.collection("students").onSnapshot(snap => {
                 const list = [];
-                snap.forEach(doc => list.push(sanitizeStudent(doc.id, doc.data())));
-                app.students = list;
+                snap.forEach(doc => list.push(sanitize(doc.id, doc.data())));
+                studentsData = list;
                 app.refreshCurrentPage();
             });
+            
+            db.collection("paymentApprovals").where("status", "==", "pending").onSnapshot(snap => {
+                const list = [];
+                snap.forEach(doc => list.push({id: doc.id, ...doc.data()}));
+                pendingApprovals = list;
+                if(activePage === 'approvals') app.refreshCurrentPage();
+            });
+            
+            app.nav('dashboard');
         },
 
         nav: (page) => {
-            app.activePage = page;
+            activePage = page;
             app.refreshCurrentPage();
         },
 
         refreshCurrentPage: () => {
+            document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
+            const navEl = document.getElementById('nav-'+activePage);
+            if(navEl) navEl.classList.add('active');
+
             const container = document.getElementById('main-content');
-            if(app.activePage === 'dashboard') app.renderDashboard(container);
-            if(app.activePage === 'students') app.renderStudentList(container);
-            if(app.activePage === 'approvals') app.renderApprovals(container);
-        },
-
-        renderDashboard: (container) => {
-            const total = app.students.length;
-            const collected = app.students.reduce((acc, s) => acc + s.feesPaid, 0);
-            const pending = app.students.reduce((acc, s) => acc + (s.totalFees - s.feesPaid), 0);
             
-            container.innerHTML = `
-                <h2 class="text-2xl font-bold mb-6">Dashboard</h2>
-                <div class="grid md:grid-cols-3 gap-4">
-                    <div class="card p-6 border-l-4 border-blue-500">
-                        <div class="text-gray-500">Total Students</div><div class="text-3xl font-bold">${total}</div>
+            if(activePage === 'dashboard') {
+                 const total = studentsData.length;
+                 const collected = studentsData.reduce((acc, s) => acc + s.feesPaid, 0);
+                 const pending = studentsData.reduce((acc, s) => acc + (s.totalFees - s.feesPaid), 0);
+                 
+                 container.innerHTML = `
+                    <h2 class="text-2xl font-bold mb-6">Dashboard</h2>
+                    <div class="grid md:grid-cols-3 gap-4 mb-8">
+                        <div class="card p-6 border-l-4 border-blue-500">
+                            <div class="text-gray-500">Admissions</div><div class="text-3xl font-bold">${total}</div>
+                        </div>
+                        <div class="card p-6 border-l-4 border-green-500">
+                            <div class="text-gray-500">Collected</div><div class="text-3xl font-bold text-green-600">₹${collected.toLocaleString()}</div>
+                        </div>
+                        <div class="card p-6 border-l-4 border-yellow-500">
+                            <div class="text-gray-500">Pending</div><div class="text-3xl font-bold text-yellow-600">₹${pending.toLocaleString()}</div>
+                        </div>
                     </div>
-                    <div class="card p-6 border-l-4 border-green-500">
-                        <div class="text-gray-500">Collected</div><div class="text-3xl font-bold text-green-600">₹${collected.toLocaleString()}</div>
+                    <div class="grid md:grid-cols-2 gap-6">
+                        <div class="card p-4"><canvas id="chart1"></canvas></div>
+                        <div class="card p-4"><canvas id="chart2"></canvas></div>
                     </div>
-                    <div class="card p-6 border-l-4 border-yellow-500">
-                        <div class="text-gray-500">Pending</div><div class="text-3xl font-bold text-yellow-600">₹${pending.toLocaleString()}</div>
+                 `;
+                 
+                 setTimeout(() => {
+                     const banking = studentsData.filter(s => s.enrollmentType === 'banking').length;
+                     const both = studentsData.filter(s => s.enrollmentType === 'banking_ssc').length;
+                     new Chart(document.getElementById('chart1'), { type: 'doughnut', data: { labels: ['Banking', 'Both'], datasets: [{ data: [banking, both], backgroundColor: ['#3b82f6', '#10b981'] }] } });
+                     new Chart(document.getElementById('chart2'), { type: 'bar', data: { labels: ['Collected', 'Pending'], datasets: [{ label: '₹', data: [collected, pending], backgroundColor: ['#10b981', '#f59e0b'] }] } });
+                 }, 100);
+            } 
+            else if(activePage === 'students') {
+                 container.innerHTML = `
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-2xl font-bold">Students</h2>
+                        <button onclick="app.showAddModal()" class="btn btn-primary">Add Student</button>
                     </div>
-                </div>
-            `;
-        },
-
-        renderStudentList: (container) => {
-            container.innerHTML = `
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-2xl font-bold">Students</h2>
-                    <button onclick="app.showAddModal()" class="btn btn-primary">Add Student</button>
-                </div>
-                <input onkeyup="app.filterTable(this.value)" placeholder="Search..." class="input-field mb-4">
-                <div class="card overflow-x-auto">
-                    <table class="w-full text-left text-sm">
-                        <thead class="bg-gray-100"><tr><th class="p-3">Name</th><th class="p-3">Batch</th><th class="p-3">Fees</th><th class="p-3">Action</th></tr></thead>
-                        <tbody id="stu-table">${app.genRows(app.students)}</tbody>
-                    </table>
-                </div>
-            `;
-        },
-
-        filterTable: (val) => {
-            const filtered = app.students.filter(s => s.name.toLowerCase().includes(val.toLowerCase()));
-            document.getElementById('stu-table').innerHTML = app.genRows(filtered);
-        },
-
-        genRows: (list) => {
-            return list.map(s => `
-                <tr class="border-b">
-                    <td class="p-3 font-bold text-blue-600 cursor-pointer" onclick="app.openProfile('${s.id}')">${s.name}<br><span class="text-xs text-gray-400 font-normal">${s.id}</span></td>
-                    <td class="p-3">${s.batchName}</td>
-                    <td class="p-3">Tot: ₹${s.totalFees}<br><span class="text-green-600">Pd: ₹${s.feesPaid}</span></td>
-                    <td class="p-3"><button onclick="app.openEdit('${s.id}')" class="btn btn-secondary text-xs">Edit</button></td>
-                </tr>
-            `).join('');
-        },
-
-        renderApprovals: (container) => {
-             db.collection("paymentApprovals").where("status", "==", "pending").onSnapshot(snap => {
-                let html = `<h2 class="text-2xl font-bold mb-4">Pending Approvals</h2>`;
-                if(snap.empty) html += `<div class="card p-4 text-gray-500">No pending payments.</div>`;
-                snap.forEach(doc => {
-                    const p = doc.data();
+                    <input onkeyup="app.filterTable(this.value)" placeholder="Search..." class="input-field mb-4">
+                    <div class="card overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                            <thead class="bg-gray-100"><tr><th class="p-3">Name</th><th class="p-3">Batch</th><th class="p-3">Fees</th><th class="p-3">Count</th><th class="p-3">Action</th></tr></thead>
+                            <tbody id="stu-table">${app.genRows(studentsData)}</tbody>
+                        </table>
+                    </div>
+                `;
+            }
+            else if(activePage === 'approvals') {
+                let html = `<h2 class="text-2xl font-bold mb-4">Approvals</h2>`;
+                if(pendingApprovals.length === 0) html += `<div class="card p-4 text-gray-500">No pending items.</div>`;
+                pendingApprovals.forEach(p => {
                     html += `
                         <div class="card p-4 flex flex-col md:flex-row justify-between md:items-center gap-4">
-                            <div><div class="font-bold">${p.studentName}</div><div class="text-blue-600">Claimed: ₹${p.amountPaid}</div></div>
+                            <div><div class="font-bold">${p.studentName}</div><div class="text-blue-600">Paid: ₹${p.amountPaid}</div></div>
                             <div class="flex gap-2">
                                 <button onclick="app.viewProof('${p.imageDataUrl}')" class="btn btn-secondary">Proof</button>
-                                <button onclick="app.processPay('${doc.id}', '${p.studentId}', ${p.amountPaid}, true)" class="btn btn-success">Approve</button>
-                                <button onclick="app.processPay('${doc.id}', '${p.studentId}', 0, false)" class="btn btn-danger">Reject</button>
+                                <button onclick="app.processPay('${p.id}', '${p.studentId}', ${p.amountPaid}, true)" class="btn btn-success">Approve</button>
+                                <button onclick="app.processPay('${p.id}', '${p.studentId}', 0, false)" class="btn btn-danger">Reject</button>
                             </div>
                         </div>`;
                 });
                 container.innerHTML = html;
-             });
+            }
         },
-        
-        // --- ACTIONS ---
+
+        filterTable: (val) => {
+            const filtered = studentsData.filter(s => s.name.toLowerCase().includes(val.toLowerCase()));
+            document.getElementById('stu-table').innerHTML = app.genRows(filtered);
+        },
+
+        genRows: (list) => {
+            return list.map(s => {
+                const due = s.totalFees - s.feesPaid;
+                const date = new Date(s.enrollmentDate);
+                const deadline = new Date(date.setDate(date.getDate() + 15));
+                const daysLeft = Math.ceil((deadline - new Date()) / (1000*60*60*24));
+                
+                let cnt = "";
+                if(due <= 0) cnt = `<span class="text-green-600 font-bold">Done</span>`;
+                else if(daysLeft > 0) cnt = `<span class="text-yellow-600 font-bold">${daysLeft} Days</span>`;
+                else cnt = `<span class="text-red-600 font-bold">Overdue</span>`;
+
+                return `
+                <tr class="border-b">
+                    <td class="p-3 font-bold text-blue-600 cursor-pointer" onclick="app.openEdit('${s.id}')">${s.name}<br><span class="text-xs text-gray-400 font-normal">${s.id}</span></td>
+                    <td class="p-3">${s.batchName}</td>
+                    <td class="p-3">T:₹${s.totalFees} / P:₹${s.feesPaid} / <span class="text-red-500">D:₹${due}</span></td>
+                    <td class="p-3">${cnt}</td>
+                    <td class="p-3"><button onclick="app.openEdit('${s.id}')" class="btn btn-secondary text-xs">Edit</button></td>
+                </tr>`;
+            }).join('');
+        },
+
+        // --- ADMIN ACTIONS ---
         showAddModal: () => {
             app.openModal(`
                 <h3 class="font-bold text-lg mb-4">Add Student</h3>
                 <input id="n-name" class="input-field mb-2" placeholder="Name">
-                <input id="n-email" class="input-field mb-2" placeholder="Email">
+                <input id="n-email" class="input-field mb-2" placeholder="Email (e.g. user@mail.com)">
                 <select id="n-type" class="input-field mb-2">
                     <option value="banking">Banking (₹16k)</option>
                     <option value="banking_ssc">Banking+SSC (₹18k)</option>
                 </select>
-                <input id="n-batch" class="input-field mb-2" placeholder="Batch">
+                <input id="n-batch" class="input-field mb-2" placeholder="Batch (e.g. July 15)">
+                <label class="text-xs text-gray-500">Enrollment Date</label>
                 <input id="n-date" type="date" class="input-field mb-4">
                 <button onclick="app.submitAdd()" class="btn btn-primary w-full">Save</button>
             `);
@@ -327,14 +363,20 @@
 
         submitAdd: async () => {
             const name = document.getElementById('n-name').value;
+            const email = document.getElementById('n-email').value;
             const type = document.getElementById('n-type').value;
-            const fee = type === 'banking_ssc' ? 18000 : 16000;
+            const batch = document.getElementById('n-batch').value;
+            const date = document.getElementById('n-date').value;
+
+            if(!name || !email || !batch || !date) return alert("Fill all fields");
+            if(!email.includes('@') || !email.includes('.')) return alert("Invalid Email Format");
+
+            const fee = (type === 'banking_ssc') ? 18000 : 16000;
             const id = name.toLowerCase().replace(/[^a-z0-9]/g, '.') + '.' + Math.floor(100+Math.random()*900);
+
             try {
                 await db.collection("students").doc(id).set({
-                    name: name, email: document.getElementById('n-email').value,
-                    enrollmentType: type, batchName: document.getElementById('n-batch').value,
-                    enrollmentDate: document.getElementById('n-date').value,
+                    name: name, email: email, enrollmentType: type, batchName: batch, enrollmentDate: date,
                     courseFee: fee, discountGiven: 0, totalFees: fee, feesPaid: 0,
                     paymentStatus: 'not_paid', bankingBooks: 'No', sscBooks: 'No', guidelyApp: 'No', ibsApp: 'No',
                     createdAt: new Date().toISOString()
@@ -344,26 +386,32 @@
         },
 
         openEdit: (id) => {
-            const s = app.students.find(x => x.id === id);
+            const s = studentsData.find(x => x.id === id);
             app.openModal(`
                 <h3 class="font-bold mb-4">Edit: ${s.name}</h3>
-                <label class="text-xs">Discount (₹)</label><input id="e-disc" type="number" class="input-field mb-2" value="${s.discountGiven}">
-                <label class="text-xs">Total Paid (₹)</label><input id="e-paid" type="number" class="input-field mb-4" value="${s.feesPaid}">
+                <div class="mb-4 p-3 bg-gray-50 rounded">
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        <div><label class="text-xs">Discount (₹)</label><input id="e-disc" type="number" class="input-field" value="${s.discountGiven}"></div>
+                        <div><label class="text-xs">Total Paid (₹)</label><input id="e-paid" type="number" class="input-field" value="${s.feesPaid}"></div>
+                    </div>
+                    <button onclick="app.saveEdit('${id}')" class="btn btn-primary w-full text-sm">Update Financials</button>
+                </div>
+                <h4 class="font-bold text-sm mb-2">Resources</h4>
                 <div class="grid grid-cols-2 gap-2 mb-4">
-                    <select id="e-bank" class="input-field"><option ${s.bankingBooks=='No'?'selected':''}>No</option><option ${s.bankingBooks=='Yes'?'selected':''}>Yes</option></select>
-                    <select id="e-ssc" class="input-field"><option ${s.sscBooks=='No'?'selected':''}>No</option><option ${s.sscBooks=='Yes'?'selected':''}>Yes</option><option ${s.sscBooks=='Not opted'?'selected':''}>Not opted</option></select>
-                    <select id="e-guide" class="input-field"><option ${s.guidelyApp=='No'?'selected':''}>No</option><option ${s.guidelyApp=='Yes'?'selected':''}>Yes</option></select>
-                    <select id="e-ibs" class="input-field"><option ${s.ibsApp=='No'?'selected':''}>No</option><option ${s.ibsApp=='Yes'?'selected':''}>Yes</option></select>
+                    <div><label class="text-xs">Bank Books</label><select id="e-bank" class="input-field text-xs"><option ${s.bankingBooks=='No'?'selected':''}>No</option><option ${s.bankingBooks=='Yes'?'selected':''}>Yes</option></select></div>
+                    <div><label class="text-xs">SSC Books</label><select id="e-ssc" class="input-field text-xs"><option ${s.sscBooks=='No'?'selected':''}>No</option><option ${s.sscBooks=='Yes'?'selected':''}>Yes</option><option ${s.sscBooks=='Not opted'?'selected':''}>Not opted</option></select></div>
+                    <div><label class="text-xs">Guidely</label><select id="e-guide" class="input-field text-xs"><option ${s.guidelyApp=='No'?'selected':''}>No</option><option ${s.guidelyApp=='Yes'?'selected':''}>Yes</option></select></div>
+                    <div><label class="text-xs">IBS</label><select id="e-ibs" class="input-field text-xs"><option ${s.ibsApp=='No'?'selected':''}>No</option><option ${s.ibsApp=='Yes'?'selected':''}>Yes</option></select></div>
                 </div>
                 <div class="flex gap-2">
-                    <button onclick="app.saveEdit('${id}')" class="btn btn-primary w-full">Save</button>
-                    <button onclick="app.del('${id}')" class="btn btn-danger">Del</button>
+                    <button onclick="app.saveResources('${id}')" class="btn btn-secondary w-full">Save Resources</button>
+                    <button onclick="app.del('${id}')" class="btn btn-danger">Delete</button>
                 </div>
             `);
         },
 
         saveEdit: async (id) => {
-            const s = app.students.find(x => x.id === id);
+            const s = studentsData.find(x => x.id === id);
             const disc = Number(document.getElementById('e-disc').value);
             const paid = Number(document.getElementById('e-paid').value);
             const newTotal = s.courseFee - disc;
@@ -372,7 +420,13 @@
             if(paid >= newTotal) status = 'fully_paid';
 
             await db.collection("students").doc(id).update({
-                discountGiven: disc, totalFees: newTotal, feesPaid: paid, paymentStatus: status,
+                discountGiven: disc, totalFees: newTotal, feesPaid: paid, paymentStatus: status
+            });
+            alert("Financials Updated");
+        },
+
+        saveResources: async (id) => {
+            await db.collection("students").doc(id).update({
                 bankingBooks: document.getElementById('e-bank').value,
                 sscBooks: document.getElementById('e-ssc').value,
                 guidelyApp: document.getElementById('e-guide').value,
@@ -382,17 +436,20 @@
         },
 
         del: async (id) => {
-            if(confirm("Delete?")) { await db.collection("students").doc(id).delete(); app.closeModal(); }
+            if(confirm("Delete permanently?")) { await db.collection("students").doc(id).delete(); app.closeModal(); }
         },
-        
+
         processPay: async (pid, sid, amt, ok) => {
             if(ok) {
                 const doc = await db.collection("students").doc(sid).get();
-                const s = sanitizeStudent(sid, doc.data());
-                let status = 'half_paid';
-                if ((s.feesPaid + amt) >= s.totalFees) status = 'fully_paid';
-                await db.collection("students").doc(sid).update({ feesPaid: s.feesPaid + amt, paymentStatus: status });
-                await db.collection("paymentApprovals").doc(pid).update({ status: 'approved' });
+                if (doc.exists) {
+                     const s = sanitize(sid, doc.data());
+                     const newPaid = s.feesPaid + amt;
+                     let status = 'half_paid';
+                     if (newPaid >= s.totalFees) status = 'fully_paid';
+                     await db.collection("students").doc(sid).update({ feesPaid: newPaid, paymentStatus: status });
+                     await db.collection("paymentApprovals").doc(pid).update({ status: 'approved' });
+                }
             } else {
                 await db.collection("paymentApprovals").doc(pid).update({ status: 'rejected' });
             }
@@ -400,15 +457,12 @@
         },
 
         // --- STUDENT LOGIC ---
-        initStudent: (id) => {
-            document.getElementById('main-content').innerHTML = `<div class="p-10 text-center">Loading...</div>`;
+        startStudentListener: (id) => {
+            document.getElementById('main-content').innerHTML = `<div class="p-10 text-center">Loading Profile...</div>`;
             db.collection("students").doc(id).onSnapshot(doc => {
-                if(!doc.exists) {
-                     document.getElementById('main-content').innerHTML = `<div class="p-10 text-center text-red-600 font-bold">Record Not Found</div>`;
-                     return;
-                }
-                const s = sanitizeStudent(id, doc.data());
-                window.currentStudentData = s;
+                if(!doc.exists) { document.getElementById('main-content').innerHTML = `<div class="p-10 text-center text-red-600 font-bold">Record Not Found</div>`; return; }
+                const s = sanitize(id, doc.data());
+                currentStudent = s;
                 app.renderStudentDash(s);
             });
         },
@@ -418,39 +472,41 @@
             const date = new Date(s.enrollmentDate);
             const deadline = new Date(date.setDate(date.getDate() + 15));
             const daysLeft = Math.ceil((deadline - new Date()) / (1000*60*60*24));
-            
+
             let banner = "";
-            if(s.paymentStatus === 'pending_verification') banner = `<div class="bg-blue-100 text-blue-800 p-4 rounded mb-6 font-bold text-center">⏳ Verification Pending</div>`;
-            else if(due <= 0) banner = `<div class="bg-green-100 text-green-800 p-4 rounded mb-6 font-bold text-center">✅ Fully Paid</div>`;
-            else if(daysLeft > 0) banner = `<div class="bg-yellow-100 text-yellow-800 p-4 rounded mb-6 font-bold text-center">⚠️ Due: ${daysLeft} Days Left</div>`;
-            else banner = `<div class="bg-red-100 text-red-800 p-4 rounded mb-6 font-bold text-center">❌ Deadline Passed</div>`;
+            if(s.paymentStatus === 'pending_verification') banner = `<div class="bg-blue-100 text-blue-800 p-4 rounded font-bold text-center mb-6">⏳ Verification Pending</div>`;
+            else if(due <= 0) banner = `<div class="bg-green-100 text-green-800 p-4 rounded font-bold text-center mb-6">✅ Fully Paid</div>`;
+            else if(daysLeft > 0) banner = `<div class="bg-yellow-100 text-yellow-800 p-4 rounded font-bold text-center mb-6">⚠️ Due: ${daysLeft} Days Left</div>`;
+            else banner = `<div class="bg-red-100 text-red-800 p-4 rounded font-bold text-center mb-6">❌ Deadline Passed</div>`;
 
             document.getElementById('main-content').innerHTML = `
-                <div class="max-w-2xl mx-auto card overflow-hidden">
-                    <div class="bg-blue-600 p-6 text-white">
-                        <h2 class="text-2xl font-bold">Hi, ${s.name.split(' ')[0]}</h2>
-                        <p class="opacity-90">${s.batchName}</p>
-                    </div>
-                    <div class="p-6">
-                        ${banner}
-                        <div class="grid grid-cols-2 gap-4 border rounded p-4 bg-gray-50 mb-6">
-                            <div><div class="text-xs text-gray-500">Fee</div><div class="font-bold">₹${s.totalFees}</div></div>
-                            <div><div class="text-xs text-gray-500">Paid</div><div class="font-bold text-green-600">₹${s.feesPaid}</div></div>
-                            <div class="col-span-2 border-t pt-2 flex justify-between"><span class="text-gray-500 font-bold">Due</span><span class="text-xl text-red-600 font-bold">₹${due}</span></div>
+                <div class="max-w-2xl mx-auto mt-4">
+                    <div class="card overflow-hidden mb-6">
+                        <div class="bg-blue-600 p-6 text-white">
+                            <h2 class="text-2xl font-bold">Hi, ${s.name.split(' ')[0]}</h2>
+                            <p class="opacity-90">${s.batchName}</p>
                         </div>
-                        <div class="mb-6 space-y-2 text-sm">
-                            <div class="flex justify-between border-b"><span>Banking</span><b>${s.bankingBooks}</b></div>
-                            <div class="flex justify-between border-b"><span>SSC</span><b>${s.sscBooks}</b></div>
-                            <div class="flex justify-between border-b"><span>Guidely</span><b>${s.guidelyApp}</b></div>
-                            <div class="flex justify-between border-b"><span>IBS</span><b>${s.ibsApp}</b></div>
-                        </div>
-                        ${due > 0 && s.paymentStatus !== 'pending_verification' ? `
-                            <div class="grid grid-cols-2 gap-3 mb-3">
-                                <button onclick="app.showQR(${due})" class="btn btn-primary">Pay Full</button>
-                                <button onclick="app.showQR(${s.totalFees/2})" class="btn btn-secondary">Pay Half</button>
+                        <div class="p-6">
+                            ${banner}
+                            <div class="grid grid-cols-2 gap-4 border rounded p-4 bg-gray-50 mb-6">
+                                <div><div class="text-xs text-gray-500">Total Fee</div><div class="font-bold">₹${s.totalFees}</div></div>
+                                <div><div class="text-xs text-gray-500">Paid</div><div class="font-bold text-green-600">₹${s.feesPaid}</div></div>
+                                <div class="col-span-2 border-t pt-2 flex justify-between"><span class="text-gray-500 font-bold">Due</span><span class="text-xl text-red-600 font-bold">₹${due}</span></div>
                             </div>
-                            <button onclick="app.showUpload()" class="btn btn-success w-full">Upload Proof</button>
-                        ` : `<button onclick="app.genPDF()" class="btn btn-secondary w-full border-2">Receipt</button>`}
+                            <div class="mb-6 space-y-2 text-sm">
+                                <div class="flex justify-between border-b pb-1"><span>Banking</span><b>${s.bankingBooks}</b></div>
+                                <div class="flex justify-between border-b pb-1"><span>SSC</span><b>${s.sscBooks}</b></div>
+                                <div class="flex justify-between border-b pb-1"><span>Guidely</span><b>${s.guidelyApp}</b></div>
+                                <div class="flex justify-between border-b pb-1"><span>IBS</span><b>${s.ibsApp}</b></div>
+                            </div>
+                            ${due > 0 && s.paymentStatus !== 'pending_verification' ? `
+                                <div class="grid grid-cols-2 gap-3 mb-3">
+                                    <button onclick="app.showQR(${due})" class="btn btn-primary">Pay Full</button>
+                                    <button onclick="app.showQR(${s.totalFees/2})" class="btn btn-secondary">Pay Half</button>
+                                </div>
+                                <button onclick="app.showUpload()" class="btn btn-success w-full">Upload Proof</button>
+                            ` : `<button onclick="app.genPDF()" class="btn btn-secondary w-full border-2">Receipt</button>`}
+                        </div>
                     </div>
                 </div>
             `;
@@ -469,26 +525,29 @@
         
         showQR: (amt) => {
             if(UPI_ID.includes("YOUR")) return alert("Admin Config Error");
+            const link = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(PAYEE_NAME)}&am=${amt}&cu=INR`;
             app.openModal(`
-                <div class="text-center">
+                <div class="p-6 text-center">
                     <h3 class="font-bold text-xl mb-2">Scan to Pay ₹${amt}</h3>
                     <div id="qrcode" class="flex justify-center my-4"></div>
                     <p class="text-xs text-gray-500">Pay: ${PAYEE_NAME}</p>
                     <div id="qr-timer" class="text-red-500 font-bold mt-2">5:00</div>
+                    <button onclick="app.closeModal()" class="btn btn-secondary w-full mt-4">Close</button>
                 </div>
             `);
-            new QRCode(document.getElementById("qrcode"), { text: `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(PAYEE_NAME)}&am=${amt}&cu=INR`, width: 180, height: 180 });
+            new QRCode(document.getElementById("qrcode"), { text: link, width: 180, height: 180 });
             let t = 300;
+            if(qrTimerInterval) clearInterval(qrTimerInterval);
             qrTimerInterval = setInterval(() => {
                 t--; document.getElementById('qr-timer').innerText = `${Math.floor(t/60)}:${(t%60).toString().padStart(2,'0')}`;
-                if(t<=0) { app.closeModal(); alert("Expired"); }
+                if(t<=0) { clearInterval(qrTimerInterval); app.closeModal(); alert("Expired"); }
             }, 1000);
         },
 
         showUpload: () => {
             app.openModal(`
                 <h3 class="font-bold mb-4">Upload Proof</h3>
-                <input id="up-amt" type="number" class="input-field mb-3" placeholder="Amount">
+                <input id="up-amt" type="number" class="input-field mb-3" placeholder="Amount Paid">
                 <input id="up-file" type="file" class="input-field mb-4" accept="image/*">
                 <button onclick="app.handleUpload()" class="btn btn-primary w-full">Submit</button>
             `);
@@ -497,35 +556,40 @@
         handleUpload: () => {
             const file = document.getElementById('up-file').files[0];
             const amt = Number(document.getElementById('up-amt').value);
-            if(!file || !amt) return alert("Fill all");
+            if(!file || !amt) return alert("Fill all fields");
             const reader = new FileReader();
             reader.onload = async (e) => {
                 try {
                     await db.collection("paymentApprovals").add({
-                        studentId: currentUser, studentName: window.currentStudentData.name,
+                        studentId: currentUser, studentName: currentStudent.name,
                         amountPaid: amt, imageDataUrl: e.target.result, status: "pending", date: new Date().toISOString()
                     });
                     await db.collection("students").doc(currentUser).update({ paymentStatus: 'pending_verification' });
                     alert("Uploaded!"); app.closeModal();
-                } catch(e) { alert(e.message); }
+                } catch(err) { alert(err.message); }
             };
             reader.readAsDataURL(file);
         },
         
-        viewProof: (url) => app.openModal(`<img src="${url}" class="rounded max-h-[80vh] mx-auto">`),
+        viewProof: (url) => {
+            app.openModal(`<img src="${url}" class="rounded max-h-[80vh] mx-auto"><button onclick="app.closeModal()" class="btn btn-secondary w-full mt-4">Close</button>`);
+        },
 
         genPDF: () => {
-            const s = window.currentStudentData;
+            const s = currentStudent;
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
             doc.text(PAYEE_NAME, 105, 20, {align:'center'});
-            doc.text(`Name: ${s.name}`, 20, 40);
-            doc.text(`Paid: Rs. ${s.feesPaid}`, 20, 50);
+            doc.text("Fee Receipt", 105, 30, {align:'center'});
+            doc.text(`Name: ${s.name}`, 20, 50);
+            doc.text(`Batch: ${s.batchName}`, 20, 60);
+            doc.text(`Total Fees: Rs.${s.totalFees}`, 20, 80);
+            doc.text(`Paid: Rs.${s.feesPaid}`, 20, 90);
+            doc.text(`Status: ${s.feesPaid >= s.totalFees ? 'Fully Paid' : 'Due'}`, 20, 110);
             doc.save("Receipt.pdf");
         }
     };
 
-    // --- START ---
     app.init();
   </script>
 </body>
