@@ -5,22 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Guidely & IBS Learning Center</title>
   
-  <!-- EXTERNAL LIBRARIES -->
+  <!-- LIBRARIES -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
-  <!-- FIREBASE COMPAT LIBRARIES -->
+  <!-- FIREBASE COMPAT -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-    body { font-family: 'Inter', sans-serif; background: #f3f4f6; min-height: 100vh; }
+    body { font-family: 'Inter', sans-serif; background: #f3f4f6; min-height: 100vh; display: flex; flex-direction: column; }
     
-    .card { background: white; border-radius: 1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 1rem; border: 1px solid #e5e7eb; }
+    .card { background: white; border-radius: 1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border: 1px solid #e5e7eb; margin-bottom: 1rem; overflow: hidden; }
     .btn { padding: 0.5rem 1rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; justify-content: center; }
     .btn-primary { background: #2563eb; color: white; }
     .btn-secondary { background: #e5e7eb; color: #374151; }
@@ -34,34 +34,38 @@
     .tab-btn { flex: 1; padding: 1rem; text-align: center; cursor: pointer; font-weight: 600; color: #6b7280; border-bottom: 2px solid #e5e7eb; }
     .tab-btn.active { color: #2563eb; border-bottom-color: #2563eb; }
 
-    /* Sidebar - Hidden by default */
-    #sidebar { width: 16rem; background: #1f2937; color: white; flex-shrink: 0; height: calc(100vh - 4rem); overflow-y: auto; display: none; }
+    #sidebar { width: 16rem; background: #1f2937; color: white; flex-shrink: 0; height: calc(100vh - 4rem); overflow-y: auto; }
     .nav-link { display: block; padding: 0.75rem 1rem; cursor: pointer; }
     .nav-link:hover { background: #374151; }
     .nav-link.active { background: #2563eb; }
     
-    @media (min-width: 768px) {
-        /* Show sidebar only when 'active' class is added via JS */
-        #sidebar.active { display: block; }
+    .badge { background: #ef4444; color: white; font-size: 0.75rem; padding: 0.1rem 0.4rem; border-radius: 999px; font-weight: bold; }
+
+    @media (max-width: 768px) {
+        #sidebar { display: none; }
+        #mobile-nav { display: flex; }
     }
   </style>
 </head>
 <body class="flex flex-col h-screen">
 
   <!-- Header -->
-  <header class="bg-white shadow-sm h-16 flex-shrink-0 flex items-center justify-between px-4 z-20">
-    <div class="font-bold text-lg text-blue-700">Guidely & IBS</div>
-    <button id="logout-btn" onclick="app.logout()" class="hidden text-sm text-red-600 font-bold border border-red-200 px-3 py-1 rounded">Log Out</button>
+  <header class="bg-white shadow-sm h-16 flex-shrink-0 flex items-center justify-between px-6 z-20">
+    <div class="font-bold text-xl text-blue-700">Guidely & IBS</div>
+    <div class="flex gap-4 items-center">
+        <span id="user-display" class="hidden text-sm text-gray-500 font-mono bg-gray-100 px-2 py-1 rounded"></span>
+        <button id="logout-btn" onclick="app.logout()" class="hidden text-sm text-red-600 font-bold border border-red-200 px-3 py-1 rounded">Log Out</button>
+    </div>
   </header>
 
   <!-- Body -->
   <div class="flex flex-grow overflow-hidden">
-      <!-- Sidebar (Initially Hidden) -->
-      <nav id="sidebar">
+      <!-- Sidebar (Admin Only) -->
+      <nav id="sidebar" class="hidden md:hidden">
           <div class="p-4 font-bold text-lg border-b border-gray-700">Menu</div>
           <a onclick="app.nav('dashboard')" id="nav-dashboard" class="nav-link">Dashboard</a>
           <a onclick="app.nav('students')" id="nav-students" class="nav-link">Students</a>
-          <a onclick="app.nav('approvals')" id="nav-approvals" class="nav-link">Payments</a>
+          <a onclick="app.nav('approvals')" id="nav-approvals" class="nav-link">Payments <span id="pay-badge" class="ml-2 bg-red-500 text-white text-xs px-2 rounded-full hidden">0</span></a>
       </nav>
 
       <!-- Main Content -->
@@ -73,11 +77,11 @@
       </main>
   </div>
 
-  <!-- Mobile Nav (Bottom) -->
-  <div id="mobile-nav" class="md:hidden bg-white border-t flex justify-around p-2 hidden">
-      <button onclick="app.nav('dashboard')" class="p-2 text-sm font-bold">Dash</button>
-      <button onclick="app.nav('students')" class="p-2 text-sm font-bold">Students</button>
-      <button onclick="app.nav('approvals')" class="p-2 text-sm font-bold">Pay</button>
+  <!-- Mobile Nav -->
+  <div id="mobile-nav" class="md:hidden bg-white border-t flex justify-around p-2 hidden flex-shrink-0">
+      <button onclick="app.nav('dashboard')" class="p-2 text-sm font-bold text-gray-600">Dash</button>
+      <button onclick="app.nav('students')" class="p-2 text-sm font-bold text-gray-600">Students</button>
+      <button onclick="app.nav('approvals')" class="p-2 text-sm font-bold text-gray-600">Pay</button>
   </div>
 
   <!-- Modal -->
@@ -90,7 +94,7 @@
 
   <script>
     // ==========================================
-    // STEP 1: CONFIG
+    // STEP 1: PASTE FIREBASE KEYS HERE
     // ==========================================
     const firebaseConfig = {
        apiKey: "AIzaSyCIbJUeEBbB9-W2x1Ni7B_azsS1DFOtlOs",
@@ -101,6 +105,9 @@
   	appId: "1:529968274796:web:a37ca33c9e653a468de749"
     };
 
+    // ==========================================
+    // STEP 2: UPI DETAILS
+    // ==========================================
     const UPI_ID = "ibsjpnagar-3@okhdfcbank"; 
     const PAYEE_NAME = "Guidely & IBS Learning Center";
     const ADMIN_ID = "shriniketan.j";
@@ -113,7 +120,7 @@
         auth = firebase.auth();
         auth.signInAnonymously().catch(e => alert("Auth Error: " + e.message));
     } catch (e) {
-        document.body.innerHTML = `<div class="p-10 text-red-600 text-center"><b>Config Error:</b><br>${e.message}</div>`;
+        document.body.innerHTML = `<div class="p-10 text-center text-red-600 font-bold">Config Error: ${e.message}</div>`;
     }
 
     // --- STATE ---
@@ -125,6 +132,9 @@
     let activePage = 'dashboard';
     let qrTimerInterval = null;
     let currentStudent = null;
+    let feeChart = null;
+    let enrollChart = null;
+    let selectedBatch = 'All';
 
     // --- DATA SANITIZER ---
     function sanitize(id, d) {
@@ -137,7 +147,7 @@
             courseFee: Number(d.courseFee) || Number(d.totalFees) || 0,
             feesPaid: Number(d.feesPaid) || 0,
             discountGiven: Number(d.discountGiven) || 0,
-            enrollmentType: d.enrollmentType || "banking",
+            enrollmentType: d.enrollmentType || "Banking",
             enrollmentDate: d.enrollmentDate || new Date().toISOString(),
             bankingBooks: d.bankingBooks || "No",
             sscBooks: d.sscBooks || "No",
@@ -177,17 +187,38 @@
         loginSuccess: (id) => {
             currentUser = id;
             isAdmin = (id === ADMIN_ID);
-            document.getElementById('logout-btn').classList.remove('hidden');
+            
+            const logoutBtn = document.getElementById('logout-btn');
+            if(logoutBtn) logoutBtn.classList.remove('hidden');
+            
+            const userDisplay = document.getElementById('user-display');
+            if(userDisplay) {
+                userDisplay.classList.remove('hidden');
+                userDisplay.textContent = id;
+            }
+            
+            const sidebar = document.getElementById('sidebar');
+            const mobileNav = document.getElementById('mobile-nav');
             
             if(isAdmin) {
-                // Show Sidebar ONLY for Admin
-                document.getElementById('sidebar').classList.add('active'); 
-                document.getElementById('mobile-nav').classList.remove('hidden');
+                if(sidebar) {
+                    sidebar.classList.remove('hidden');
+                    sidebar.classList.add('flex');
+                }
+                if(mobileNav) {
+                    mobileNav.classList.remove('hidden');
+                    mobileNav.classList.add('flex');
+                }
                 app.startAdminListener();
             } else {
-                // Hide Sidebar for Student
-                document.getElementById('sidebar').classList.remove('active');
-                document.getElementById('mobile-nav').classList.add('hidden');
+                if(sidebar) {
+                    sidebar.classList.add('hidden');
+                    sidebar.classList.remove('flex');
+                }
+                if(mobileNav) {
+                    mobileNav.classList.add('hidden');
+                    mobileNav.classList.remove('flex');
+                }
                 app.startStudentListener(id);
             }
         },
@@ -198,10 +229,15 @@
         },
 
         renderLogin: () => {
-            // Ensure sidebar is hidden on login screen
-            document.getElementById('sidebar').classList.remove('active');
-            document.getElementById('mobile-nav').classList.add('hidden');
-            document.getElementById('logout-btn').classList.add('hidden');
+            // Safe UI Reset
+            const sidebar = document.getElementById('sidebar');
+            if(sidebar) sidebar.classList.add('hidden');
+            
+            const mobileNav = document.getElementById('mobile-nav');
+            if(mobileNav) mobileNav.classList.add('hidden');
+            
+            const headerActions = document.getElementById('header-actions');
+            if(headerActions) headerActions.classList.add('hidden');
 
             const isStu = loginTab === 'student';
             document.getElementById('main-content').innerHTML = `
@@ -234,6 +270,11 @@
                 const list = [];
                 snap.forEach(doc => list.push({id: doc.id, ...doc.data()}));
                 pendingApprovals = list;
+                const badge = document.getElementById('pay-badge');
+                if(badge) {
+                    if(list.length > 0) { badge.innerText = list.length; badge.classList.remove('hidden'); }
+                    else badge.classList.add('hidden');
+                }
                 if(activePage === 'approvals') app.refreshCurrentPage();
             });
             
@@ -245,75 +286,89 @@
             app.refreshCurrentPage();
         },
 
-        refreshCurrentPage: () => {
-            document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
-            const navEl = document.getElementById('nav-'+activePage);
-            if(navEl) navEl.classList.add('active');
+        setBatchFilter: () => {
+             selectedBatch = document.getElementById('dash-batch-filter').value;
+             app.renderDashboard(document.getElementById('main-content'));
+        },
 
+        refreshCurrentPage: () => {
             const container = document.getElementById('main-content');
+            if(activePage === 'dashboard') app.renderDashboard(container);
+            else if(activePage === 'students') app.renderStudentList(container);
+            else if(activePage === 'approvals') app.renderApprovals(container);
+        },
+
+        renderDashboard: (container) => {
+            // Get Batches
+            const batches = ["All", ...new Set(studentsData.map(s => s.batchName))];
             
-            if(activePage === 'dashboard') {
-                 const total = studentsData.length;
-                 const collected = studentsData.reduce((acc, s) => acc + s.feesPaid, 0);
-                 const pending = studentsData.reduce((acc, s) => acc + (s.totalFees - s.feesPaid), 0);
-                 
-                 container.innerHTML = `
-                    <h2 class="text-2xl font-bold mb-6">Dashboard</h2>
-                    <div class="grid md:grid-cols-3 gap-4 mb-8">
-                        <div class="card p-6 border-l-4 border-blue-500">
-                            <div class="text-gray-500">Admissions</div><div class="text-3xl font-bold">${total}</div>
-                        </div>
-                        <div class="card p-6 border-l-4 border-green-500">
-                            <div class="text-gray-500">Collected</div><div class="text-3xl font-bold text-green-600">₹${collected.toLocaleString()}</div>
-                        </div>
-                        <div class="card p-6 border-l-4 border-yellow-500">
-                            <div class="text-gray-500">Pending</div><div class="text-3xl font-bold text-yellow-600">₹${pending.toLocaleString()}</div>
-                        </div>
-                    </div>
-                    <div class="grid md:grid-cols-2 gap-6">
-                        <div class="card p-4"><canvas id="chart1"></canvas></div>
-                        <div class="card p-4"><canvas id="chart2"></canvas></div>
-                    </div>
-                 `;
-                 
-                 setTimeout(() => {
-                     const banking = studentsData.filter(s => s.enrollmentType === 'banking').length;
-                     const both = studentsData.filter(s => s.enrollmentType === 'banking_ssc').length;
-                     new Chart(document.getElementById('chart1'), { type: 'doughnut', data: { labels: ['Banking', 'Both'], datasets: [{ data: [banking, both], backgroundColor: ['#3b82f6', '#10b981'] }] } });
-                     new Chart(document.getElementById('chart2'), { type: 'bar', data: { labels: ['Collected', 'Pending'], datasets: [{ label: '₹', data: [collected, pending], backgroundColor: ['#10b981', '#f59e0b'] }] } });
-                 }, 100);
-            } 
-            else if(activePage === 'students') {
-                 container.innerHTML = `
-                    <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-2xl font-bold">Students</h2>
-                        <button onclick="app.showAddModal()" class="btn btn-primary">Add Student</button>
-                    </div>
-                    <input onkeyup="app.filterTable(this.value)" placeholder="Search..." class="input-field mb-4">
-                    <div class="card overflow-x-auto">
-                        <table class="w-full text-left text-sm">
-                            <thead class="bg-gray-100"><tr><th class="p-3">Name</th><th class="p-3">Batch</th><th class="p-3">Fees</th><th class="p-3">Count</th><th class="p-3">Action</th></tr></thead>
-                            <tbody id="stu-table">${app.genRows(studentsData)}</tbody>
-                        </table>
-                    </div>
-                `;
+            // Filter Data
+            let filteredData = studentsData;
+            if(selectedBatch !== 'All') {
+                filteredData = studentsData.filter(s => s.batchName === selectedBatch);
             }
-            else if(activePage === 'approvals') {
-                let html = `<h2 class="text-2xl font-bold mb-4">Approvals</h2>`;
-                if(pendingApprovals.length === 0) html += `<div class="card p-4 text-gray-500">No pending items.</div>`;
-                pendingApprovals.forEach(p => {
-                    html += `
-                        <div class="card p-4 flex flex-col md:flex-row justify-between md:items-center gap-4">
-                            <div><div class="font-bold">${p.studentName}</div><div class="text-blue-600">Paid: ₹${p.amountPaid}</div></div>
-                            <div class="flex gap-2">
-                                <button onclick="app.viewProof('${p.imageDataUrl}')" class="btn btn-secondary">Proof</button>
-                                <button onclick="app.processPay('${p.id}', '${p.studentId}', ${p.amountPaid}, true)" class="btn btn-success">Approve</button>
-                                <button onclick="app.processPay('${p.id}', '${p.studentId}', 0, false)" class="btn btn-danger">Reject</button>
-                            </div>
-                        </div>`;
+
+            const total = filteredData.length;
+            const collected = filteredData.reduce((acc, s) => acc + s.feesPaid, 0);
+            const pending = filteredData.reduce((acc, s) => acc + (s.totalFees - s.feesPaid), 0);
+            
+            const banking = filteredData.filter(s => s.enrollmentType.toLowerCase().includes('banking') && !s.enrollmentType.toLowerCase().includes('ssc')).length;
+            const both = filteredData.filter(s => s.enrollmentType.toLowerCase().includes('ssc')).length;
+
+            container.innerHTML = `
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold">Dashboard</h2>
+                    <select id="dash-batch-filter" onchange="app.setBatchFilter()" class="input-field w-48">
+                        ${batches.map(b => `<option value="${b}" ${b===selectedBatch?'selected':''}>${b}</option>`).join('')}
+                    </select>
+                </div>
+
+                <div class="grid md:grid-cols-3 gap-4 mb-8">
+                    <div class="card p-6 border-l-4 border-blue-500">
+                        <div class="text-gray-500">Total Admissions</div><div class="text-3xl font-bold">${total}</div>
+                    </div>
+                    <div class="card p-6 border-l-4 border-green-500">
+                        <div class="text-gray-500">Total Fees Collected</div><div class="text-3xl font-bold text-green-600">₹${collected.toLocaleString()}</div>
+                    </div>
+                    <div class="card p-6 border-l-4 border-yellow-500">
+                        <div class="text-gray-500">Total Fees Pending</div><div class="text-3xl font-bold text-yellow-600">₹${pending.toLocaleString()}</div>
+                    </div>
+                </div>
+                <div class="grid md:grid-cols-2 gap-6">
+                    <div class="card p-4"><canvas id="chart1"></canvas></div>
+                    <div class="card p-4"><canvas id="chart2"></canvas></div>
+                </div>
+            `;
+            
+            setTimeout(() => {
+                if(feeChart) feeChart.destroy();
+                if(enrollChart) enrollChart.destroy();
+                enrollChart = new Chart(document.getElementById('chart1'), {
+                    type: 'doughnut', data: { labels: ['Banking', 'Both'], datasets: [{ data: [banking, both], backgroundColor: ['#3b82f6', '#10b981'] }] }
                 });
-                container.innerHTML = html;
-            }
+                feeChart = new Chart(document.getElementById('chart2'), {
+                    type: 'bar', data: { labels: ['Collected', 'Pending'], datasets: [{ label: '₹', data: [collected, pending], backgroundColor: ['#10b981', '#f59e0b'] }] }
+                });
+            }, 100);
+        },
+
+        renderStudentList: (container) => {
+            container.innerHTML = `
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-bold">Students</h2>
+                    <div class="flex gap-2">
+                         <button onclick="app.exportCSV()" class="btn btn-secondary text-sm">Export</button>
+                         <button onclick="app.showAddModal()" class="btn btn-primary">Add Student</button>
+                    </div>
+                </div>
+                <input onkeyup="app.filterTable(this.value)" placeholder="Search..." class="input-field mb-4">
+                <div class="card overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-gray-100"><tr><th class="p-3">Name</th><th class="p-3">Batch</th><th class="p-3">Fees</th><th class="p-3">Status</th><th class="p-3">Action</th></tr></thead>
+                        <tbody id="stu-table">${app.genRows(studentsData)}</tbody>
+                    </table>
+                </div>
+            `;
         },
 
         filterTable: (val) => {
@@ -324,24 +379,39 @@
         genRows: (list) => {
             return list.map(s => {
                 const due = s.totalFees - s.feesPaid;
-                const date = new Date(s.enrollmentDate);
-                const deadline = new Date(date.setDate(date.getDate() + 15));
-                const daysLeft = Math.ceil((deadline - new Date()) / (1000*60*60*24));
-                
-                let cnt = "";
-                if(due <= 0) cnt = `<span class="text-green-600 font-bold">Done</span>`;
-                else if(daysLeft > 0) cnt = `<span class="text-yellow-600 font-bold">${daysLeft} Days</span>`;
-                else cnt = `<span class="text-red-600 font-bold">Overdue</span>`;
+                let status = "";
+                if(due <= 0) status = `<span class="text-green-600 font-bold">Paid</span>`;
+                else status = `<span class="text-yellow-600 font-bold">Due: ₹${due}</span>`;
 
                 return `
-                <tr class="border-b">
+                <tr class="border-b hover:bg-gray-50">
                     <td class="p-3 font-bold text-blue-600 cursor-pointer" onclick="app.openEdit('${s.id}')">${s.name}<br><span class="text-xs text-gray-400 font-normal">${s.id}</span></td>
                     <td class="p-3">${s.batchName}</td>
-                    <td class="p-3">T:₹${s.totalFees} / P:₹${s.feesPaid} / <span class="text-red-500">D:₹${due}</span></td>
-                    <td class="p-3">${cnt}</td>
+                    <td class="p-3">
+                        <div><span class="font-bold">Total:</span> ₹${s.totalFees}</div>
+                        <div class="text-green-600"><span class="font-bold">Paid:</span> ₹${s.feesPaid}</div>
+                    </td>
+                    <td class="p-3">${status}</td>
                     <td class="p-3"><button onclick="app.openEdit('${s.id}')" class="btn btn-secondary text-xs">Edit</button></td>
                 </tr>`;
             }).join('');
+        },
+
+        renderApprovals: (container) => {
+             let html = `<h2 class="text-2xl font-bold mb-4">Approvals</h2>`;
+             if(pendingApprovals.length === 0) html += `<div class="card p-4 text-gray-500">No pending items.</div>`;
+             pendingApprovals.forEach(p => {
+                 html += `
+                    <div class="card p-4 flex flex-col md:flex-row justify-between md:items-center gap-4">
+                        <div><div class="font-bold">${p.studentName}</div><div class="text-blue-600">Paid: ₹${p.amountPaid}</div></div>
+                        <div class="flex gap-2">
+                            <button onclick="app.viewProof('${p.imageDataUrl}')" class="btn btn-secondary">Proof</button>
+                            <button onclick="app.processPay('${p.id}', '${p.studentId}', ${p.amountPaid}, true)" class="btn btn-success">Approve</button>
+                            <button onclick="app.processPay('${p.id}', '${p.studentId}', 0, false)" class="btn btn-danger">Reject</button>
+                        </div>
+                    </div>`;
+             });
+             container.innerHTML = html;
         },
 
         // --- ADMIN ACTIONS ---
@@ -349,7 +419,7 @@
             app.openModal(`
                 <h3 class="font-bold text-lg mb-4">Add Student</h3>
                 <input id="n-name" class="input-field mb-2" placeholder="Name">
-                <input id="n-email" class="input-field mb-2" placeholder="Email (e.g. user@mail.com)">
+                <input id="n-email" type="email" class="input-field mb-2" placeholder="Email (e.g. user@mail.com)">
                 <select id="n-type" class="input-field mb-2">
                     <option value="banking">Banking (₹16k)</option>
                     <option value="banking_ssc">Banking+SSC (₹18k)</option>
@@ -369,7 +439,8 @@
             const date = document.getElementById('n-date').value;
 
             if(!name || !email || !batch || !date) return alert("Fill all fields");
-            if(!email.includes('@') || !email.includes('.')) return alert("Invalid Email Format");
+            // Email Check
+            if(!email.includes('@') || !email.includes('.')) return alert("Invalid Email");
 
             const fee = (type === 'banking_ssc') ? 18000 : 16000;
             const id = name.toLowerCase().replace(/[^a-z0-9]/g, '.') + '.' + Math.floor(100+Math.random()*900);
@@ -392,7 +463,7 @@
                 <div class="mb-4 p-3 bg-gray-50 rounded">
                     <div class="grid grid-cols-2 gap-2 mb-2">
                         <div><label class="text-xs">Discount (₹)</label><input id="e-disc" type="number" class="input-field" value="${s.discountGiven}"></div>
-                        <div><label class="text-xs">Total Paid (₹)</label><input id="e-paid" type="number" class="input-field" value="${s.feesPaid}"></div>
+                        <div><label class="text-xs">Total Paid (₹)</label><input id="e-paid" type="number" class="input-field mb-4" value="${s.feesPaid}"></div>
                     </div>
                     <button onclick="app.saveEdit('${id}')" class="btn btn-primary w-full text-sm">Update Financials</button>
                 </div>
@@ -454,6 +525,10 @@
                 await db.collection("paymentApprovals").doc(pid).update({ status: 'rejected' });
             }
             alert(ok ? "Approved" : "Rejected");
+        },
+        
+        viewProof: (url) => {
+            app.openModal(`<img src="${url}" class="rounded max-h-[80vh] mx-auto"><button onclick="app.closeModal()" class="btn btn-secondary w-full mt-4">Close</button>`);
         },
 
         // --- STUDENT LOGIC ---
@@ -530,7 +605,6 @@
                 <div class="p-6 text-center">
                     <h3 class="font-bold text-xl mb-2">Scan to Pay ₹${amt}</h3>
                     <div id="qrcode" class="flex justify-center my-4"></div>
-                    <p class="text-xs text-gray-500">Pay: ${PAYEE_NAME}</p>
                     <div id="qr-timer" class="text-red-500 font-bold mt-2">5:00</div>
                     <button onclick="app.closeModal()" class="btn btn-secondary w-full mt-4">Close</button>
                 </div>
@@ -561,32 +635,57 @@
             reader.onload = async (e) => {
                 try {
                     await db.collection("paymentApprovals").add({
-                        studentId: currentUser, studentName: currentStudent.name,
+                        studentId: currentUser, studentName: window.currentStudent.name,
                         amountPaid: amt, imageDataUrl: e.target.result, status: "pending", date: new Date().toISOString()
                     });
                     await db.collection("students").doc(currentUser).update({ paymentStatus: 'pending_verification' });
-                    alert("Uploaded!"); app.closeModal();
+                    alert("Uploaded! Waiting for approval."); app.closeModal();
                 } catch(err) { alert(err.message); }
             };
             reader.readAsDataURL(file);
-        },
-        
-        viewProof: (url) => {
-            app.openModal(`<img src="${url}" class="rounded max-h-[80vh] mx-auto"><button onclick="app.closeModal()" class="btn btn-secondary w-full mt-4">Close</button>`);
         },
 
         genPDF: () => {
             const s = currentStudent;
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
+            
+            // Header
+            doc.setFontSize(18);
             doc.text(PAYEE_NAME, 105, 20, {align:'center'});
-            doc.text("Fee Receipt", 105, 30, {align:'center'});
+            doc.setFontSize(12);
+            doc.text("Official Payment Receipt", 105, 30, {align:'center'});
+            
+            // Details
             doc.text(`Name: ${s.name}`, 20, 50);
             doc.text(`Batch: ${s.batchName}`, 20, 60);
-            doc.text(`Total Fees: Rs.${s.totalFees}`, 20, 80);
-            doc.text(`Paid: Rs.${s.feesPaid}`, 20, 90);
-            doc.text(`Status: ${s.feesPaid >= s.totalFees ? 'Fully Paid' : 'Due'}`, 20, 110);
+            doc.text(`Date: ${new Date().toLocaleDateString()}`, 140, 50);
+            
+            // Financials
+            doc.text(`Course Fee:`, 20, 80);     doc.text(`Rs. ${s.courseFee}`, 160, 80, {align:'right'});
+            doc.text(`Discount:`, 20, 90);       doc.text(`- Rs. ${s.discountGiven}`, 160, 90, {align:'right'});
+            doc.line(20, 95, 190, 95);
+            doc.setFont(undefined, 'bold');
+            doc.text(`Total Payable:`, 20, 105);  doc.text(`Rs. ${s.totalFees}`, 160, 105, {align:'right'});
+            doc.text(`Amount Paid:`, 20, 115);    doc.text(`Rs. ${s.feesPaid}`, 160, 115, {align:'right'});
+            
+            const status = s.feesPaid >= s.totalFees ? "PAID IN FULL" : "PARTIAL PAYMENT";
+            doc.setTextColor(s.feesPaid >= s.totalFees ? 0 : 200, s.feesPaid >= s.totalFees ? 128 : 0, 0);
+            doc.text(`STATUS: ${status}`, 20, 135);
+            
             doc.save("Receipt.pdf");
+        },
+
+        exportCSV: () => {
+            if(!studentsData.length) return alert("No Data");
+            let csv = "Name,ID,Batch,Total,Paid,Due,Status\n";
+            studentsData.forEach(s => {
+                csv += `"${s.name}","${s.id}","${s.batchName}",${s.totalFees},${s.feesPaid},${s.totalFees-s.feesPaid},${s.paymentStatus}\n`;
+            });
+            const link = document.createElement("a");
+            link.href = "data:text/csv;charset=utf-8," + encodeURI(csv);
+            link.download = "Students.csv";
+            link.click();
         }
     };
 
